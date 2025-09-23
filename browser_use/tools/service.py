@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from browser_use.agent.views import ActionModel, ActionResult
 from browser_use.browser import BrowserSession
+from browser_use.custom_logging import log_action_cdp_calls
 from browser_use.browser.events import (
 	ClickElementEvent,
 	CloseTabEvent,
@@ -149,6 +150,9 @@ class Tools(Generic[Context]):
 				)
 				await event
 				await event.event_result(raise_if_any=True, raise_if_none=False)
+				
+				log_action_cdp_calls("search", params.model_dump(), browser_session)
+				
 				memory = f"Searched {params.search_engine.title()} for '{params.query}'"
 				msg = f'🔍  {memory}'
 				logger.info(msg)
@@ -166,6 +170,8 @@ class Tools(Generic[Context]):
 				event = browser_session.event_bus.dispatch(NavigateToUrlEvent(url=params.url, new_tab=params.new_tab))
 				await event
 				await event.event_result(raise_if_any=True, raise_if_none=False)
+
+				log_action_cdp_calls("go_to_url", params.model_dump(), browser_session)
 
 				if params.new_tab:
 					memory = f'Opened new tab with URL {params.url}'
@@ -208,6 +214,9 @@ class Tools(Generic[Context]):
 			try:
 				event = browser_session.event_bus.dispatch(GoBackEvent())
 				await event
+				
+				log_action_cdp_calls("go_back", {}, browser_session)
+				
 				memory = 'Navigated back'
 				msg = f'🔙  {memory}'
 				logger.info(msg)
@@ -256,6 +265,9 @@ class Tools(Generic[Context]):
 				await event
 				# Wait for handler to complete and get any exception or metadata
 				click_metadata = await event.event_result(raise_if_any=True, raise_if_none=False)
+				
+				log_action_cdp_calls("click_element_by_index", params.model_dump(), browser_session)
+				
 				memory = 'Clicked element'
 
 				if params.while_holding_ctrl:
@@ -323,6 +335,8 @@ class Tools(Generic[Context]):
 				)
 				await event
 				input_metadata = await event.event_result(raise_if_any=True, raise_if_none=False)
+
+				log_action_cdp_calls("input_text", params.model_dump(), browser_session)
 
 				# Create message with sensitive data handling
 				if has_sensitive_data:
@@ -489,6 +503,9 @@ class Tools(Generic[Context]):
 				event = browser_session.event_bus.dispatch(UploadFileEvent(node=file_input_node, file_path=params.path))
 				await event
 				await event.event_result(raise_if_any=True, raise_if_none=False)
+				
+				log_action_cdp_calls("upload_file_to_element", params.model_dump(), browser_session)
+				
 				msg = f'Successfully uploaded file to index {params.index}'
 				logger.info(f'📁 {msg}')
 				return ActionResult(
@@ -510,6 +527,8 @@ class Tools(Generic[Context]):
 				event = browser_session.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
 				await event
 				new_target_id = await event.event_result(raise_if_any=False, raise_if_none=False)  # Don't raise on errors
+
+				log_action_cdp_calls("switch_tab", params.model_dump(), browser_session)
 
 				if new_target_id:
 					memory = f'Switched to tab #{new_target_id[-4:]}'
@@ -533,6 +552,8 @@ class Tools(Generic[Context]):
 				event = browser_session.event_bus.dispatch(CloseTabEvent(target_id=target_id))
 				await event
 				await event.event_result(raise_if_any=False, raise_if_none=False)  # Don't raise on errors
+
+				log_action_cdp_calls("close_tab", params.model_dump(), browser_session)
 
 				memory = f'Closed tab #{params.tab_id}'
 				logger.info(f'🗑️  {memory}')
@@ -795,6 +816,8 @@ You will be given a query and the markdown of a webpage that has been filtered t
 					await event.event_result(raise_if_any=True, raise_if_none=False)
 					long_term_memory = f'Scrolled {direction} {target} by {params.num_pages} pages ({viewport_height}px per page)'
 
+				log_action_cdp_calls("scroll", params.model_dump(), browser_session)
+
 				msg = f'🔍 {long_term_memory}'
 				logger.info(msg)
 				return ActionResult(extracted_content=msg, long_term_memory=long_term_memory)
@@ -813,6 +836,9 @@ You will be given a query and the markdown of a webpage that has been filtered t
 				event = browser_session.event_bus.dispatch(SendKeysEvent(keys=params.keys))
 				await event
 				await event.event_result(raise_if_any=True, raise_if_none=False)
+
+				log_action_cdp_calls("send_keys", params.model_dump(), browser_session)
+				
 				memory = f'Sent keys: {params.keys}'
 				msg = f'⌨️  {memory}'
 				logger.info(msg)
@@ -832,6 +858,9 @@ You will be given a query and the markdown of a webpage that has been filtered t
 			try:
 				# The handler returns None on success or raises an exception if text not found
 				await event.event_result(raise_if_any=True, raise_if_none=False)
+				
+				log_action_cdp_calls("scroll_to_text", {"text": text}, browser_session)
+				
 				memory = f'Scrolled to text: {text}'
 				msg = f'🔍  {memory}'
 				logger.info(msg)
@@ -866,6 +895,8 @@ You will be given a query and the markdown of a webpage that has been filtered t
 			if not dropdown_data:
 				raise ValueError('Failed to get dropdown options - no data returned')
 
+			log_action_cdp_calls("get_dropdown_options", params.model_dump(), browser_session)
+
 			# Use structured memory from the handler
 			return ActionResult(
 				extracted_content=dropdown_data['short_term_memory'],
@@ -892,6 +923,8 @@ You will be given a query and the markdown of a webpage that has been filtered t
 
 			if not selection_data:
 				raise ValueError('Failed to select dropdown option - no data returned')
+
+			log_action_cdp_calls("select_dropdown_option", params.model_dump(), browser_session)
 
 			# Check if the selection was successful
 			if selection_data.get('success') == 'true':
@@ -1035,6 +1068,8 @@ SHADOW DOM ACCESS EXAMPLE:
 			# Execute JavaScript with proper error handling and promise support
 
 			cdp_session = await browser_session.get_or_create_cdp_session()
+
+			log_action_cdp_calls("execute_js", {"code": code}, browser_session)
 
 			try:
 				# Always use awaitPromise=True - it's ignored for non-promises

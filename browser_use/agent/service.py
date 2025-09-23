@@ -60,6 +60,11 @@ from browser_use.config import CONFIG
 from browser_use.dom.views import DOMInteractedElement
 from browser_use.filesystem.file_system import FileSystem
 from browser_use.observability import observe, observe_debug
+from browser_use.custom_logging import (
+	build_selector_map_for_log as cl_build_selector_map_for_log,
+	log_debug_llm_decision as cl_log_debug_llm_decision,
+	log_browser_dimensions as cl_log_browser_dimensions,
+)
 from browser_use.sync import CloudSync
 from browser_use.telemetry.service import ProductTelemetry
 from browser_use.telemetry.views import AgentTelemetryEvent
@@ -264,6 +269,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self.sensitive_data = sensitive_data
 
 		self.sample_images = sample_images
+		self._last_selector_map_str: str | None = None
 
 		self.settings = AgentSettings(
 			use_vision=use_vision,
@@ -697,6 +703,15 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		self._log_step_context(browser_state_summary)
 		await self._raise_if_stopped_or_paused()
+
+		# Build selector map string once for this step (no emission here)
+		try:
+			if browser_state_summary and browser_state_summary.dom_state and browser_state_summary.dom_state.selector_map:
+				self._last_selector_map_str = cl_build_selector_map_for_log(browser_state_summary.dom_state.selector_map)
+			else:
+				self._last_selector_map_str = None
+		except Exception:
+			self._last_selector_map_str = None
 
 		# Update action models with page-specific actions
 		self.logger.debug(f'📝 Step {self.state.n_steps}: Updating action models...')
@@ -1190,6 +1205,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				log_response(parsed, self.tools.registry.registry, self.logger)
 
 			self._log_next_action_summary(parsed)
+			# Centralized decision logging
+			cl_log_debug_llm_decision(parsed, selector_map_str=self._last_selector_map_str)
 			return parsed
 		except ValidationError:
 			# Just re-raise - Pydantic's validation errors are already descriptive
@@ -1755,6 +1772,11 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				self.logger.debug(
 					f'☑️ Executed action {i + 1}/{total_actions}: {green}{action_params}{reset} in {time_elapsed:.2f}s'
 				)
+
+				try:
+					await cl_log_browser_dimensions(self.browser_session)
+				except Exception:
+					pass
 
 				if results[-1].is_done or results[-1].error or i == total_actions - 1:
 					break

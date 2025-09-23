@@ -22,6 +22,9 @@ from browser_use.browser.views import BrowserError, URLNotAllowedError
 from browser_use.browser.watchdog_base import BaseWatchdog
 from browser_use.dom.service import EnhancedDOMTreeNode
 from browser_use.observability import observe_debug
+from browser_use.custom_logging import (
+	log_abspos_focus_click as cl_log_abspos_focus_click,
+)
 
 # Import EnhancedDOMTreeNode and rebuild event models that have forward references to it
 # This must be done after all imports are complete
@@ -1040,6 +1043,10 @@ class DefaultActionWatchdog(BaseWatchdog):
 				center_x = element_node.absolute_position.x + element_node.absolute_position.width / 2
 				center_y = element_node.absolute_position.y + element_node.absolute_position.height / 2
 				input_coordinates = {'input_x': center_x, 'input_y': center_y}
+				try:
+					cl_log_abspos_focus_click(cdp_session.target_id, element_node.backend_node_id, center_x, center_y, modifiers=0)
+				except Exception:
+					pass
 				self.logger.debug(f'Using absolute_position coordinates: x={center_x:.1f}, y={center_y:.1f}')
 			else:
 				input_coordinates = None
@@ -1159,7 +1166,6 @@ class DefaultActionWatchdog(BaseWatchdog):
 			# to update their internal state and trigger re-renders
 			await self._trigger_framework_events(object_id=object_id, cdp_session=cdp_session)
 
-			# Return coordinates metadata if available
 			return input_coordinates
 
 		except Exception as e:
