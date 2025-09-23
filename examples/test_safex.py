@@ -219,6 +219,76 @@ def setup_filtered_run_file_logging(run_uuid: str, session_id: str | None = None
     return ctx_filter, csv_path, json_path
 
 
+def extract_python_snippets_to_file(filtered_json_path: Path, run_uuid: str) -> Path:
+    """
+    Extract python_code snippets from filtered JSON logs and create a .py file 
+    with the specified format.
+    """
+    logs_dir = filtered_json_path.parent
+    python_snippets_path = logs_dir / f"{run_uuid}_python_snippets.py"
+    
+    python_snippets = []
+    
+    try:
+        if filtered_json_path.exists():
+            with open(filtered_json_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        log_entry = json.loads(line.strip())
+                        message = log_entry.get('message', '')
+                        
+                        # Look for DEBUG_LLM_DECISION or DEBUG_LLM_DECISION_TEXT_INPUT messages
+                        if (message.startswith(DECISION_PREFIX) or message.startswith(DECISION_PREFIX_TEXT)):
+                            # Extract JSON payload from the message
+                            json_start = message.find('{')
+                            if json_start != -1:
+                                json_payload = message[json_start:]
+                                try:
+                                    payload_data = json.loads(json_payload)
+                                    python_code = payload_data.get('python_code', '')
+                                    if python_code and python_code.strip() != "# Execute via CDP":
+                                        # Normalize snippet formatting to single-line JSON objects inside calls
+                                        def _normalize_snippet(s: str) -> str:
+                                            # Collapse common multi-line object patterns to single line
+                                            s = s.replace("{\n", "{")
+                                            s = s.replace("\n    ", " ")  # 4-space indents
+                                            s = s.replace("\n  ", " ")    # 2-space indents
+                                            s = s.replace("\n}", "}")
+                                            return s
+
+                                        normalized_code = _normalize_snippet(python_code)
+                                        python_snippets.append({
+                                            "python_code": normalized_code
+                                        })
+                                except json.JSONDecodeError:
+                                    continue
+                    except json.JSONDecodeError:
+                        continue
+        
+        # Write the Python file with the extracted snippets in the requested format
+        file_lines = ["# Auto-generated list of CDP python snippets per iteration", "json_data = ["]
+        
+        for i, snippet in enumerate(python_snippets):
+            python_code = snippet["python_code"]
+            file_lines.append("    {")
+            file_lines.append('        "python_code": """' + python_code + '"""')
+            if i < len(python_snippets) - 1:
+                file_lines.append("    },")
+            else:
+                file_lines.append("    }")
+        
+        file_lines.append("]")
+        file_lines.append("")  # Empty line at end
+        
+        file_content = "\n".join(file_lines)
+        python_snippets_path.write_text(file_content, encoding='utf-8')
+        
+    except Exception as e:
+        print(f"Warning: Failed to extract python snippets: {e}")
+    
+    return python_snippets_path
+
+
 async def main():
     # Generate a UUID for this run and set up file logging
     run_uuid = uuid.uuid4().hex
@@ -257,13 +327,19 @@ async def main():
             await session.kill()
         except Exception:
             pass
+        
+        # Ensure logs are flushed
+        logging.shutdown()
+        
+        # Extract python snippets from filtered logs and create .py file
+        python_snippets_path = extract_python_snippets_to_file(filtered_json_path, run_uuid)
+        
         # Print file paths in the same logical sequence as they are logged
         print(str(csv_path))
         print(str(json_path))
         print(str(filtered_csv_path))
         print(str(filtered_json_path))
-        # Ensure logs are flushed
-        logging.shutdown()
+        print(str(python_snippets_path))
 
 
 if __name__ == "__main__":

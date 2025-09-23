@@ -265,8 +265,8 @@ class Tools(Generic[Context]):
 				await event
 				# Wait for handler to complete and get any exception or metadata
 				click_metadata = await event.event_result(raise_if_any=True, raise_if_none=False)
-				
-				log_action_cdp_calls("click_element_by_index", params.model_dump(), browser_session)
+    
+				log_action_cdp_calls("click_element_by_index", params.model_dump(), browser_session, click_metadata if isinstance(click_metadata, dict) else None)
 				
 				memory = 'Clicked element'
 

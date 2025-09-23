@@ -174,8 +174,6 @@ def log_abspos_focus_click(
         calls: list[dict] = [
             {"Target.activateTarget": {"targetId": target_id}},
             {"Target.activateTarget": {"targetId": target_id}},
-            {"DOM.getContentQuads": {"backendNodeId": backend_node_id}},
-            {"DOM.scrollIntoViewIfNeeded": {"backendNodeId": backend_node_id}},
             {"Input.dispatchMouseEvent": {"type": "mouseMoved", "x": center_x, "y": center_y}},
             {
                 "Input.dispatchMouseEvent": {
@@ -203,7 +201,7 @@ def log_abspos_focus_click(
         logging.getLogger("browser_use").debug(f"[CUSTOM_LOG] Failed to log abspos focus click: {e}")
 
 
-def log_action_cdp_calls(action_name: str, params: dict, browser_session: Any) -> None:
+def log_action_cdp_calls(action_name: str, params: dict, browser_session: Any, click_metadata: dict | None = None) -> None:
     """
     Synthesize and log CDP calls for a given action.
     This provides a fallback for actions that don't return CDP debug info natively.
@@ -250,20 +248,68 @@ def log_action_cdp_calls(action_name: str, params: dict, browser_session: Any) -
 
         elif action_name == "click_element_by_index":
             index = _params_dict.get("index")
-            calls = [
-                {"Target.activateTarget": {"targetId": target_id}},
-                {"DOM.getDocument": {}},
-                {"DOM.querySelector": {"selector": f'[data-index="{index}"]'}},
-                {"Input.dispatchMouseEvent": {"type": "mousePressed", "button": "left", "clickCount": 1}},
-                {"Input.dispatchMouseEvent": {"type": "mouseReleased", "button": "left", "clickCount": 1}},
-            ]
+            x_val = None
+            y_val = None
+            try:
+                if isinstance(click_metadata, dict):
+                    # Support multiple possible key names
+                    x_val = (
+                        click_metadata.get("click_x")
+                        if "click_x" in click_metadata
+                        else click_metadata.get("input_x")
+                        if "input_x" in click_metadata
+                        else click_metadata.get("x")
+                    )
+                    y_val = (
+                        click_metadata.get("click_y")
+                        if "click_y" in click_metadata
+                        else click_metadata.get("input_y")
+                        if "input_y" in click_metadata
+                        else click_metadata.get("y")
+                    )
+            except Exception:
+                x_val = None
+                y_val = None
+
+            calls = [{"Target.activateTarget": {"targetId": target_id}}]
+            if x_val is not None and y_val is not None:
+                calls.extend(
+                    [
+                        {"Input.dispatchMouseEvent": {"type": "mouseMoved", "x": x_val, "y": y_val}},
+                        {
+                            "Input.dispatchMouseEvent": {
+                                "type": "mousePressed",
+                                "x": x_val,
+                                "y": y_val,
+                                "button": "left",
+                                "clickCount": 1,
+                            }
+                        },
+                        {
+                            "Input.dispatchMouseEvent": {
+                                "type": "mouseReleased",
+                                "x": x_val,
+                                "y": y_val,
+                                "button": "left",
+                                "clickCount": 1,
+                            }
+                        },
+                    ]
+                )
+            else:
+                # Coordinates unknown; still log a generic click
+                calls.extend(
+                    [
+                        {"Input.dispatchMouseEvent": {"type": "mousePressed", "button": "left", "clickCount": 1}},
+                        {"Input.dispatchMouseEvent": {"type": "mouseReleased", "button": "left", "clickCount": 1}},
+                    ]
+                )
 
         elif action_name == "input_text":
             text_val = _params_dict.get("text")
             index = _params_dict.get("index")
             calls = [
                 {"Target.activateTarget": {"targetId": target_id}},
-                {"DOM.querySelector": {"selector": f'[data-index="{index}"]'}},
                 {"Input.insertText": {"text": text_val}},
             ]
 
@@ -353,13 +399,14 @@ def log_action_cdp_calls(action_name: str, params: dict, browser_session: Any) -
         if calls:
             # Log with DEBUG_LLM_DECISION prefix instead of DEBUG_LLM_DECISION_TEXT_INPUT
             try:
-                decisions_logger = logging.getLogger("browser_use.llm.decisions")
-                payload = {
-                    "final_cdp_call_executed": calls,
-                    "python_code": cdp_calls_snippet(calls),
-                }
-                message = DECISION_PREFIX + json.dumps(payload, ensure_ascii=False, indent=2)
-                decisions_logger.debug(message)
+                log_debug_llm_decision_cdp(calls)
+                # decisions_logger = logging.getLogger("browser_use.llm.decisions")
+                # payload = {
+                #     "final_cdp_call_executed": calls,
+                #     "python_code": cdp_calls_snippet(calls),
+                # }
+                # message = DECISION_PREFIX + json.dumps(payload, ensure_ascii=False, indent=2)
+                # decisions_logger.debug(message)
             except Exception as e:
                 logging.getLogger("browser_use").debug(f"[CUSTOM_LOG] Failed to log action CDP calls with DEBUG_LLM_DECISION prefix: {e}")
 
